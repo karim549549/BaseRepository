@@ -1,4 +1,4 @@
-BaseRepository for .NET Projects
+BaseRepository for .NET Projects sdasdsad
 Overview
 The BaseRepository is a versatile data access layer designed to simplify database interactions in .NET projects. Built on .NET 8 and Entity Framework Core, this repository provides a solid foundation for managing entities and performing common CRUD operations.
 
