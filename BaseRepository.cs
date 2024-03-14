@@ -1,39 +1,52 @@
+using AutoMapper;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure.Internal;
 using OnlineCoachingSystem.Repository;
 using OnlineCoachingSystem.Repository.IRepositories;
 
 using System.Collections.Generic;
-using System.Data.Entity;
-using System.Linq;
+
+using  System.Linq;
 using System.Linq.Expressions;
 using System.Text;
 using System.Threading.Tasks;
 
 namespace OnlineCoachingSystem.EF.Implementation
 {
-    public class BaseRepository<Entity>  where Entity : class
+    public class BaseRepository<Entity,Dto> :IBaseRepository<Entity,Dto> 
+        where Entity : class
+        where Dto : class
     {
         protected ApplicationDbContext _DbContext;
 
-        internal Microsoft.EntityFrameworkCore.DbSet<Entity> MyDbSet;
-        public BaseRepository(ApplicationDbContext DbContext) 
+        private readonly IMapper _mapper;
+        internal DbSet<Entity> MyDbSet;
+        public BaseRepository(ApplicationDbContext DbContext,IMapper Mapper) 
         { 
             _DbContext = DbContext;
+            _mapper = Mapper;
             MyDbSet = _DbContext.Set<Entity>();
         }
 
-
-        public async Task<IEnumerable<Entity>> AsyncAddRange(IEnumerable<Entity> entities)
+        public async Task<IEnumerable<Entity>> AsyncAddRange(IEnumerable<Dto> Dtos)
         {
+            
+            IEnumerable<Entity> entities = _mapper.Map<IEnumerable<Entity>>(Dtos);   
             await MyDbSet.AddRangeAsync(entities);
             return entities;
         }
 
-        public void RangeAttack(IEnumerable<Entity> entities)
+        public async Task<Entity> AsyncAdd(IEnumerable<Dto> Dto)
         {
-             MyDbSet.AttachRange(entities);   
+            Entity entity=_mapper.Map<Entity>(Dto);
+            await MyDbSet.AddAsync(entity);
+            return entity;
         }
-
+        public void RangeAttack(IEnumerable<Dto> Dtos)
+        {
+            IEnumerable<Entity> entities = _mapper.Map<IEnumerable<Entity>>(Dtos);
+            MyDbSet.AttachRange(entities);   
+        }
         public async Task<int>  AsyncCount(Expression<Func<Entity, bool>>? criteria)
         {
             return await MyDbSet.CountAsync(criteria);
@@ -48,13 +61,15 @@ namespace OnlineCoachingSystem.EF.Implementation
                 query = MyDbSet;
             query.ExecuteDeleteAsync();
         }
-        public  void DeleteRange(IEnumerable<Entity> entities)
+        public  void DeleteRange(IEnumerable<Dto> Dtos)
         {
-             MyDbSet.RemoveRange(entities);
+            IEnumerable<Entity> entities = _mapper.Map<IEnumerable<Entity>>(Dtos);
+            MyDbSet.RemoveRange(entities);
         }
 
         public async Task<IEnumerable<Entity>> FindAllAsync(Expression<Func<Entity, bool>>? criteria, int? take, int? skip,
-        Expression<Func<Entity , object>> orderBy = null, string orderByDirection = MagicStrings.Ascending)
+        Expression<Func<Entity , object>> orderBy = null
+            , string orderByDirection = MagicStrings.Ascending)
         {
             IQueryable<Entity> query;
             if (criteria !=null)
@@ -79,23 +94,29 @@ namespace OnlineCoachingSystem.EF.Implementation
             return await query.ToListAsync();
         }
 
-        public async Task<IEnumerable<Entity>> GetAllAsync()
+        public async Task<Entity> FindEntityAsync(Dto dto)
         {
-            return  await MyDbSet.ToListAsync();
+
+            var entity = _mapper.Map<Entity>(dto);
+            return await MyDbSet.FindAsync(entity);
         }
+        public async Task<IEnumerable<Entity>> GetAllAsync()
+        { 
+            return await MyDbSet.ToListAsync(); 
+        }
+
 
         public async Task<Entity> GetByIdAsync(int id)
         {
             return await MyDbSet.FindAsync(id);
         }
 
-        public  IEnumerable<Entity> AsyncUpdateRange(IEnumerable<Entity> entities)
+        public  IEnumerable<Entity> AsyncUpdateRange(IEnumerable<Dto> Dtos)
         {
+            IEnumerable<Entity> entities = _mapper.Map<IEnumerable<Entity>>(Dtos);
             MyDbSet.UpdateRange(entities);
             return  entities;
         }
-
-        /***********************/
 
     }
 }
