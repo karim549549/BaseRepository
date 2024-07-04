@@ -1,122 +1,176 @@
-using AutoMapper;
+using Azure;
+using CollageManagementSystem.BussniessLogicLayer.Dtos.StudentDtos;
+using CollageManagementSystem.BussniessLogicLayer.Helpers;
+using CollageManagmentSystem.businessLogicLayer.MagicData;
+using CollageManagmentSystem.businessLogicLayer.Models;
+using CollageManagmentSystem.businessLogicLayer.Services.IRepositories;
+using CollageManagmentSystem.DataAccesslayer;
+using Mapster;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure.Internal;
-using OnlineCoachingSystem.Repository;
-using OnlineCoachingSystem.Repository.IRepositories;
-
+using Microsoft.Identity.Client;
+using System;
 using System.Collections.Generic;
 
-using  System.Linq;
+using System.Data.Entity.Infrastructure;
+using System.Drawing.Printing;
+using System.Linq;
 using System.Linq.Expressions;
+using System.Net;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace OnlineCoachingSystem.EF.Implementation
+namespace CollageManagementSystem.DataAccessLayer.Repositories
 {
-    public class BaseRepository<Entity,Dto> :IBaseRepository<Entity,Dto> 
+    public class BaseRepository<Entity> : IBaseRepository<Entity>
         where Entity : class
-        where Dto : class
     {
-        protected ApplicationDbContext _DbContext;
-
-        private readonly IMapper _mapper;
-        internal DbSet<Entity> MyDbSet;
-        public BaseRepository(ApplicationDbContext DbContext,IMapper Mapper) 
-        { 
-            _DbContext = DbContext;
-            _mapper = Mapper;
-            MyDbSet = _DbContext.Set<Entity>();
-        }
-
-        public async Task<IEnumerable<Entity>> AsyncAddRange(IEnumerable<Dto> Dtos)
+        private readonly ApplicationDbContext _context;
+        protected DbSet<Entity> _dbSet;
+         
+        public BaseRepository(ApplicationDbContext context)
         {
-            
-            IEnumerable<Entity> entities = _mapper.Map<IEnumerable<Entity>>(Dtos);   
-            await MyDbSet.AddRangeAsync(entities);
-            return entities;
+            _context = context;
+            _dbSet = _context.Set<Entity>();
         }
+        public BaseRepository(){}
 
-        public async Task<Entity> AsyncAdd(IEnumerable<Dto> Dto)
+        public async Task<ApiResponse> AddRangeAsync(IEnumerable<Entity> entity)
         {
-            Entity entity=_mapper.Map<Entity>(Dto);
-            await MyDbSet.AddAsync(entity);
-            return entity;
-        }
-        public void RangeAttack(IEnumerable<Dto> Dtos)
-        {
-            IEnumerable<Entity> entities = _mapper.Map<IEnumerable<Entity>>(Dtos);
-            MyDbSet.AttachRange(entities);   
-        }
-        public async Task<int>  AsyncCount(Expression<Func<Entity, bool>>? criteria)
-        {
-            return await MyDbSet.CountAsync(criteria);
-        }
-
-        public void DeleteConditionRangeAsync( Expression<Func<Entity, bool>>? criteria)
-        {
-            IQueryable<Entity> query;
-            if (criteria != null)
-                query = MyDbSet.Where(criteria);
-            else
-                query = MyDbSet;
-            query.ExecuteDeleteAsync();
-        }
-        public  void DeleteRange(IEnumerable<Dto> Dtos)
-        {
-            IEnumerable<Entity> entities = _mapper.Map<IEnumerable<Entity>>(Dtos);
-            MyDbSet.RemoveRange(entities);
-        }
-
-        public async Task<IEnumerable<Entity>> FindAllAsync(Expression<Func<Entity, bool>>? criteria, int? take, int? skip,
-        Expression<Func<Entity , object>> orderBy = null
-            , string orderByDirection = MagicStrings.Ascending)
-        {
-            IQueryable<Entity> query;
-            if (criteria !=null)
-                     query = MyDbSet.Where(criteria);
-            else
-                     query = MyDbSet;
-
-            if (take.HasValue)
-                query = query.Take(take.Value);
-
-            if (skip.HasValue)
-                query = query.Skip(skip.Value);
-
-            if (orderBy != null)
+            await _dbSet.AddRangeAsync(entity);
+            var response = await ChangesSaved();
+            if (!response.Success)
             {
-                if (orderByDirection == MagicStrings.Ascending)
-                    query = query.OrderBy(orderBy);
-                else
-                    query = query.OrderByDescending(orderBy);
+                return response.Response;
+            }
+            return  new ApiResponse
+            {
+                Data=entity,
+                Status=HttpStatusCode.OK,
+                IsSuccess=true
+            };
+        }
+
+        public async Task<ApiResponse> Delete(Expression<Func<Entity, bool>> expression)
+        {
+        
+            var query = _dbSet.Where(expression);
+            var queryToList=await query.ToListAsync();
+            var result = await query.ExecuteDeleteAsync();
+            if(result == 0)
+            {
+                new ApiResponse
+                {
+                    Message = MagicLists.DatabaseError,
+                    Status = HttpStatusCode.BadRequest,
+                    IsSuccess = false
+                };
+            }
+            return new ApiResponse
+            {
+                Data= queryToList,
+                Status=HttpStatusCode.OK,
+                IsSuccess=true
+            };
+
+        }
+
+        public async Task<ApiResponse> GetAll<Dto>
+            (
+            bool toDto,
+            string[]? include = null,
+            Expression<Func<Entity, bool>>? condition = null,
+            int? pageSize = null,
+            int? pageNumber = null
+            )
+        {
+            IQueryable<Entity> query = _dbSet;
+
+            if (condition != null)
+            {
+                query = query.Where(condition);
             }
 
-            return await query.ToListAsync();
-        }
 
-        public async Task<Entity> FindEntityAsync(Dto dto)
+            if (include != null)
+            {
+                foreach (var includeProperty in include)
+                {
+                    query = query.Include(includeProperty);
+                }
+            }
+
+            int totalCount = await query.CountAsync();
+            PaginationMetadata paginationMetadata = new PaginationMetadata();
+
+    
+            if (pageSize.HasValue && pageNumber.HasValue)
+            {
+                paginationMetadata.TotalCount = totalCount;
+                paginationMetadata.PageSize = pageSize.Value;
+                paginationMetadata.CurrentPage = pageNumber.Value;
+                paginationMetadata.TotalPages = (int)Math.Ceiling(totalCount / (double)pageSize.Value);
+
+                query = query.Skip((pageNumber.Value - 1) * pageSize.Value).Take(pageSize.Value);
+            }
+
+            if (toDto)
+            {
+                return new ApiResponse
+                {
+                    Data = await query.ProjectToType<Dto>().ToListAsync(),
+                    Status = HttpStatusCode.OK,
+                    IsSuccess = true,
+                    PaginationMetadata = paginationMetadata
+                };
+            }
+            else
+            {
+                return new ApiResponse
+                {
+                    Data = query.ToListAsync(),
+                    Status = HttpStatusCode.OK,
+                    IsSuccess = true,
+                    PaginationMetadata = paginationMetadata
+                };
+            }
+        }
+        public async Task<ApiResponse> Update(Expression <Func<Entity,bool>> Condition,Entity entity)
         {
-
-            var entity = _mapper.Map<Entity>(dto);
-            return await MyDbSet.FindAsync(entity);
+            var Course =  await _dbSet.Where(Condition).FirstOrDefaultAsync();
+            _dbSet.Entry(Course).CurrentValues.SetValues(entity);
+            var response = await ChangesSaved();
+            if (!response.Success)
+            {
+                return response.Response;
+            }
+            return new ApiResponse
+            {
+                Data = entity,
+                Status = HttpStatusCode.OK,
+                IsSuccess = true
+            };
         }
-        public async Task<IEnumerable<Entity>> GetAllAsync()
-        { 
-            return await MyDbSet.ToListAsync(); 
-        }
-
-
-        public async Task<Entity> GetByIdAsync(int id)
+        private async Task<OperationResponse> ChangesSaved()
         {
-            return await MyDbSet.FindAsync(id);
+            var result= await _context.SaveChangesAsync();
+            if(result == 0)
+            {
+                return new OperationResponse
+                {   
+                    Response=new ApiResponse
+                    {
+                        Message=MagicLists.DatabaseError,
+                        Status=HttpStatusCode.BadRequest,
+                        IsSuccess=false
+                    },
+                    Success=false
+                };
+            }
+            return new OperationResponse
+            {
+                Success = true
+            };
         }
-
-        public  IEnumerable<Entity> AsyncUpdateRange(IEnumerable<Dto> Dtos)
-        {
-            IEnumerable<Entity> entities = _mapper.Map<IEnumerable<Entity>>(Dtos);
-            MyDbSet.UpdateRange(entities);
-            return  entities;
-        }
-
     }
 }
+
